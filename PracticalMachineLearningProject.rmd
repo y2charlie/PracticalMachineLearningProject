@@ -1,0 +1,114 @@
+---
+title: "Practical Machine Learning - HAR Prediction"
+author: "Chang, Yang Yaw"
+date: "Sunday, December 27, 2015"
+output: html_document
+---
+
+#Executive Summary
+In this report, analysis is done on [HAR](http://groupware.les.inf.puc-rio.br/har) [training dataset](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and a decision tree will be used to predict HAR [testing dataset](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv). The predictive model shall predict the manner in which they did the exercise. This is the "classe" variable in the training set. In this report, following key questions will be attended:
+
+* How the model is built.
+* How cross validation is used
+* The expected out of sample error
+* Justification on the choices made.
+
+#Data Preprocessing and Feature Reduction
+##Load required libraries
+```{r, warning=F, message=F}
+library(caret)
+library(kernlab)
+library(ggplot2)
+library(randomForest)
+library(rpart)
+library(rattle)
+```
+##Load and analyse testing and training data.
+```{r, results='hide'}
+testing<-read.csv(file="pml-testing.csv",head=TRUE,sep=",")
+training<-read.csv(file="pml-training.csv",head=TRUE,sep=",")
+str(testing)
+str(training)
+```
+##Cleaning the feature by removing columns which are not meaningful (% of NA < 70% and prior knowledge)
+```{r}
+dim(training)
+nzv <- nearZeroVar(training, saveMetrics=TRUE)
+training.temp <- training[,nzv$nzv==FALSE]
+cut.off <- round(dim(training)[1]*0.3, 0)
+training.temp <- training.temp[, colSums(is.na(training.temp)) < cut.off]
+remove = c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+training.meaningful <- training.temp[, -which(names(training.temp) %in% remove)]
+```
+##Reduce dimension of data by removing highly correlated columns (corr >= 0.9)
+```{r}
+corrMatrix <- cor(na.omit(training.meaningful[sapply(training.meaningful, is.numeric)]))
+dim(corrMatrix)
+removecor = findCorrelation(corrMatrix, cutoff = .90, verbose = TRUE)
+training.final = training.meaningful[,-removecor]
+dim(training.final)
+```
+Feature has reduced from 160 to 46 after data cleansing.
+
+##Split the training set into training and test set
+```{r}
+index.train <- createDataPartition(training.final$classe, p=0.66, list=FALSE)
+data.training <- training.final[index.train, ]
+data.testing <- training.final[-index.train, ]
+```
+2/3 of data is used for training and 1/3 is used for validation.
+
+#Analysis
+##Decision Tree
+```{r}
+set.seed(12345)
+decision.tree.model <- rpart(classe ~ ., data=data.training, method="class")
+fancyRpartPlot(decision.tree.model)
+decision.tree.validation <- predict(decision.tree.model, data.testing, type = "class")
+decision.tree.cm <- confusionMatrix(decision.tree.validation, data.testing$classe)
+decision.tree.cm
+decision.tree.cm$overall['Accuracy']
+```
+Accuracy of 0.7113 is obtained thru decision tree modelling technique. To improve the accuracy, decision tree with boostrap (cross validation): Random Forest is used.
+
+##Random Forest
+```{r}
+set.seed(12345)
+random.forest.model <- randomForest(classe ~ ., data=data.training)
+varImpPlot(random.forest.model,)
+random.forest.validation <- predict(random.forest.model, data.testing, type = "class")
+random.forest.cm <- confusionMatrix(random.forest.validation, data.testing$classe)
+random.forest.cm$overall['Accuracy'] 
+
+```
+Accuracy of 0.9938 is obtained thru random forest modelling technique.
+
+##Comparison
+The use of bootstrap technique has yielded higher accuracy in prediction. Hence, random forest shall be used for this analysis. 
+
+ 
+
+#Conclusion
+Random Forest model has OOB estimates of 0.73%.
+```{r}
+random.forest.model
+```
+
+Applying prediction model on testing data
+```{r}
+final.prediction <- predict(random.forest.model, testing, type = "class")
+final.prediction
+```
+
+Write results into text file for submission
+```{r}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(final.prediction)
+```
